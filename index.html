@@ -72,7 +72,7 @@
       <button class="close" id="closeBtn" aria-label="Close">✕</button>
     </div>
     <label>
-      <div class="badge" style="margin-bottom:6px; display:inline-block;">MCC</div>
+      <div class="badge" style="margin-bottom:6px; display:inline-block;">Category</div>
       <select id="mccFilter">
         <option value="">All categories</option>
       </select>
@@ -87,6 +87,31 @@
 
   <script>
     const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzY2szZAsGbBHJZTE6BJ4SvFku9kRpYmZy4q1XC45kuIBrLIBHBAg8lH2XvzM-3JbuRyw/exec';
+
+    // MCC code → friendly names (from your merchant list)
+    const MCC_NAMES = {
+      "5812": "Eating places and restaurants",
+      "5814": "Fast food restaurants",
+      "7298": "Health and beauty spas",
+      "7230": "Beauty and barber shops",
+      "5411": "Grocery stores, supermarkets",
+      "5499": "Miscellaneous food stores – convenience stores and specialty markets",
+      "5065": "Electrical Parts and Equipment",
+      "7997": "Membership clubs, country clubs, and private golf courses",
+      "7996": "Amusement parks, circuses and carnivals",
+      "5995": "Pet shops, pet foods and supplies stores",
+      "5732": "Electronics stores",
+      "5047": "Medical, Dental, Ophthalmic, Hospital Equipment and Supplies",
+      "7641": "Furniture, Furniture Repair, and Furniture Refinishing",
+      "7933": "Bowling alleys",
+      "7333": "Commercial Photography, Art and Graphics",
+      "5533": "Automotive parts, accessories stores",
+      "4131": "Bus lines, charters, sightseeing",
+      "7349": "Cleaning, maintenance, and janitorial services",
+      "5816": "Digital goods – games"
+      // add more if new MCCs appear
+    };
+
     let map, infowin, markers = [], allData = [];
 
     // --- UI open/close ---
@@ -124,7 +149,7 @@
           <div style="max-width:240px">
             <div style="font-weight:600;margin-bottom:4px">${item.name || 'Merchant'}</div>
             ${item.address ? `<div>${item.address}${item.city ? ', ' + item.city : ''}</div>` : ''}
-            ${item.mcc ? `<div style="margin-top:6px"><span class="badge">MCC ${item.mcc}</span></div>` : ''}
+            ${item.mcc ? `<div style="margin-top:6px"><span class="badge">${MCC_NAMES[item.mcc] || 'Category ' + item.mcc}</span></div>` : ''}
             ${item.deal ? `<div style="margin-top:6px">🔥 ${item.deal}</div>` : ''}
             ${item.phone ? `<div style="margin-top:6px">📞 ${item.phone}</div>` : ''}
             ${item.url ? `<div style="margin-top:6px"><a target="_blank" rel="noopener" href="${item.url}">Visit site</a></div>` : ''}
@@ -148,7 +173,11 @@
     function populateFilters(data) {
       const mccs = [...new Set(data.map(d => (d.mcc||'').toString().trim()).filter(Boolean))].sort();
       const sel = document.getElementById('mccFilter');
-      sel.innerHTML = `<option value="">All categories</option>` + mccs.map(m => `<option value="${m}">${m}</option>`).join('');
+      sel.innerHTML = `<option value="">All categories</option>` + 
+        mccs.map(m => {
+          const friendly = MCC_NAMES[m] || `Category ${m}`;
+          return `<option value="${m}">${friendly}</option>`;
+        }).join('');
     }
 
     function updateFabLabel(filterType, filterValue, count) {
@@ -157,7 +186,7 @@
       } else {
         let labelText = '';
         if (filterType === 'mcc') {
-          labelText = `${filterValue} (${count})`;
+          labelText = `${MCC_NAMES[filterValue] || 'Category ' + filterValue} (${count})`;
         } else if (filterType === 'search') {
           labelText = `"${filterValue}" (${count})`;
         }
