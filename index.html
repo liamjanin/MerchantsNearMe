@@ -11,12 +11,14 @@
     /* Floating Action Button */
     #fab {
       position: absolute; right: 16px; bottom: 24px; z-index: 3;
-      width: 56px; height: 56px; border-radius: 50%;
-      display: grid; place-items: center;
+      min-width: 56px; height: 56px; border-radius: 999px;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
       background: #0b5cff; color: #fff; border: none;
       box-shadow: 0 10px 24px rgba(0,0,0,.18);
-      font-size: 22px; cursor: pointer;
+      font-size: 22px; cursor: pointer; padding: 0 14px;
+      white-space: nowrap;
     }
+    #fab span.label { font-size: 14px; font-weight: 500; }
     #fab:active { transform: translateY(1px); }
 
     /* Scrim */
@@ -42,4 +44,190 @@
 
     .input, select {
       width: 100%; font-size: 16px; padding: 10px 12px; border-radius: 12px;
-      border:
+      border: 1px solid #e5e7eb; outline: none;
+    }
+    .badge { font-size: 12px; background:#f2f4f7; border-radius: 999px; padding: 2px 8px; }
+
+    /* Toast */
+    .toast {
+      position: absolute; bottom: 92px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,.8); color:#fff; padding:8px 12px; border-radius: 10px;
+      font-size: 13px; z-index: 5; display:none;
+    }
+
+    @media (min-width:720px){
+      #panel { left: auto; right: 16px; width: 360px; border-radius: 16px; max-height: 80%; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Floating UI -->
+  <button id="fab" aria-label="Search & filter">🔎</button>
+  <div id="scrim"></div>
+  <div id="panel" aria-hidden="true">
+    <div class="panel-header">
+      <div class="title">Search & Filter</div>
+      <button class="close" id="closeBtn" aria-label="Close">✕</button>
+    </div>
+    <label>
+      <div class="badge" style="margin-bottom:6px; display:inline-block;">MCC</div>
+      <select id="mccFilter">
+        <option value="">All categories</option>
+      </select>
+    </label>
+    <label>
+      <div class="badge" style="margin-bottom:6px; display:inline-block;">Search</div>
+      <input id="searchBox" class="input" type="search" placeholder="Search by name or city…"/>
+    </label>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const ENDPOINT = 'https://script.google.com/macros/s/AKfycbzY2szZAsGbBHJZTE6BJ4SvFku9kRpYmZy4q1XC45kuIBrLIBHBAg8lH2XvzM-3JbuRyw/exec';
+    let map, infowin, markers = [], allData = [];
+
+    // --- UI open/close ---
+    const fab = document.getElementById('fab');
+    const panel = document.getElementById('panel');
+    const scrim = document.getElementById('scrim');
+    const closeBtn = document.getElementById('closeBtn');
+    function openPanel(){ panel.classList.add('open'); scrim.classList.add('open'); panel.setAttribute('aria-hidden','false'); }
+    function closePanel(){ panel.classList.remove('open'); scrim.classList.remove('open'); panel.setAttribute('aria-hidden','true'); }
+    fab.addEventListener('click', openPanel);
+    closeBtn.addEventListener('click', closePanel);
+    scrim.addEventListener('click', closePanel);
+
+    // --- Helpers ---
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.style.display = 'block';
+      setTimeout(() => t.style.display = 'none', 2000);
+    }
+    async function fetchMerchants() {
+      const res = await fetch(ENDPOINT, { cache: 'no-store' });
+      if (!res.ok) throw new Error('Failed to load merchants');
+      const json = await res.json();
+      return json.merchants || [];
+    }
+    function addMarker(item) {
+      if (!item.lat || !item.lng || isNaN(item.lat) || isNaN(item.lng)) return null;
+      const marker = new google.maps.Marker({
+        position: { lat: Number(item.lat), lng: Number(item.lng) },
+        map,
+        title: item.name || 'Merchant'
+      });
+      marker.addListener('click', () => {
+        const html = `
+          <div style="max-width:240px">
+            <div style="font-weight:600;margin-bottom:4px">${item.name || 'Merchant'}</div>
+            ${item.address ? `<div>${item.address}${item.city ? ', ' + item.city : ''}</div>` : ''}
+            ${item.mcc ? `<div style="margin-top:6px"><span class="badge">MCC ${item.mcc}</span></div>` : ''}
+            ${item.deal ? `<div style="margin-top:6px">🔥 ${item.deal}</div>` : ''}
+            ${item.phone ? `<div style="margin-top:6px">📞 ${item.phone}</div>` : ''}
+            ${item.url ? `<div style="margin-top:6px"><a target="_blank" rel="noopener" href="${item.url}">Visit site</a></div>` : ''}
+            <div style="margin-top:8px">
+              <a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(item.lat+','+item.lng)}">Get directions</a>
+            </div>
+          </div>`;
+        infowin.setContent(html);
+        infowin.open(map, marker);
+      });
+      return marker;
+    }
+    function renderMarkers(data) {
+      markers.forEach(m => m.setMap(null));
+      markers = [];
+      data.forEach(item => {
+        const m = addMarker(item);
+        if (m) markers.push(m);
+      });
+    }
+    function populateFilters(data) {
+      const mccs = [...new Set(data.map(d => (d.mcc||'').toString().trim()).filter(Boolean))].sort();
+      const sel = document.getElementById('mccFilter');
+      sel.innerHTML = `<option value="">All categories</option>` + mccs.map(m => `<option value="${m}">${m}</option>`).join('');
+    }
+
+    function updateFabLabel(filterType, filterValue, count) {
+      if (!filterType) {
+        fab.innerHTML = '🔎'; // reset
+      } else {
+        let labelText = '';
+        if (filterType === 'mcc') {
+          labelText = `${filterValue} (${count})`;
+        } else if (filterType === 'search') {
+          labelText = `"${filterValue}" (${count})`;
+        }
+        fab.innerHTML = `🔎 <span class="label">${labelText}</span>`;
+      }
+    }
+
+    function applyFilters() {
+      const mccEl = document.getElementById('mccFilter');
+      const searchEl = document.getElementById('searchBox');
+      const mcc = mccEl.value.trim();
+      const q = searchEl.value.trim().toLowerCase();
+
+      let filtered = allData;
+      let filterType = null, filterValue = null;
+
+      if (mcc) {
+        searchEl.value = ''; // clear search
+        filtered = allData.filter(d => d.mcc && d.mcc.toString() === mcc);
+        filterType = 'mcc';
+        filterValue = mcc;
+      } else if (q) {
+        mccEl.value = ''; // clear category
+        filtered = allData.filter(d => {
+          const text = `${d.name||''} ${d.city||''}`.toLowerCase();
+          return text.includes(q);
+        });
+        filterType = 'search';
+        filterValue = q;
+      }
+
+      renderMarkers(filtered);
+      showToast(`${filtered.length} merchant${filtered.length===1?'':'s'}`);
+      updateFabLabel(filterType, filterValue, filtered.length);
+    }
+
+    // Debounce for search typing
+    function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+
+    async function initMap() {
+      map = new google.maps.Map(document.getElementById('map'), {
+        center: { lat: 4.5353, lng: 114.7277 },
+        zoom: 10, disableDefaultUI: true, gestureHandling: 'greedy', clickableIcons: false
+      });
+      infowin = new google.maps.InfoWindow();
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(pos => {
+          const me = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          map.setCenter(me); map.setZoom(14);
+          new google.maps.Marker({ position: me, map, title: 'You are here',
+            icon: { path: google.maps.SymbolPath.CIRCLE, scale: 6 } });
+        }, () => {}, { enableHighAccuracy: true, timeout: 6000 });
+      }
+
+      try {
+        allData = await fetchMerchants();
+        populateFilters(allData);
+        renderMarkers(allData);
+      } catch (e) {
+        console.error(e);
+        showToast('Could not load merchants');
+      }
+
+      document.getElementById('mccFilter').addEventListener('change', applyFilters);
+      document.getElementById('searchBox').addEventListener('input', debounce(applyFilters, 200));
+    }
+  </script>
+
+  <!-- Google Maps JS with your API key -->
+  <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBAPqYhFP0jgaHUSXndUrSVGS1BdRBM9cM&callback=initMap"></script>
+</body>
+</html>
